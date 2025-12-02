@@ -1,8 +1,11 @@
 #!/usr/bin/env sh
 
 [ -z "$1" ] && OPT="BASELINE" || OPT="$1"
+[ "$1" = "BEST" ] && OPT="FAST_MATH BOUNCES=10"
+
 OPT=`echo "$OPT" | tr " " "\n" | sort | tr "\n" " " | xargs`
 echo "Optimizations: $OPT"
+
 
 cd src
 make clean
