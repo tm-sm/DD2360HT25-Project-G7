@@ -6,8 +6,14 @@ NVCC           = nvcc -ccbin $(HOST_COMPILER)
 #NVCC_DBG       = -g -G
 NVCC_DBG       =
 
-# TODO -use_fast_math was added
-NVCCFLAGS      = $(NVCC_DBG) -m64
+# Activated optimizations
+DEFINES ?= 
+ARGS = $(foreach a,$(DEFINES),-D$(a))
+ifeq ($(findstring FAST_MATH, $(DEFINES)), FAST_MATH)
+    ARGS += -use_fast_math
+endif
+
+NVCCFLAGS      = $(NVCC_DBG) -m64 $(ARGS)
 GENCODE_FLAGS  = -gencode arch=compute_86,code=sm_86
 
 SRCS = main.cu

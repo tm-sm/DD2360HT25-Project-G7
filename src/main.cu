@@ -1,4 +1,5 @@
 #include <iostream>
+#include <fstream>
 #include <time.h>
 #include <float.h>
 #include <curand_kernel.h>
@@ -29,7 +30,7 @@ void check_cuda(cudaError_t result, char const *const func, const char *const fi
 __device__ vec3 color(const ray& r, hitable **world, curandState *local_rand_state) {
     ray cur_ray = r;
     vec3 cur_attenuation = vec3(1.0,1.0,1.0);
-    // TODO change the limit / refactor the code
+    // TODO change the limit / refactor the code @corentin?
     for(int i = 0; i < 50; i++) {
         hit_record rec;
         if ((*world)->hit(cur_ray, 0.001f, FLT_MAX, rec)) {
@@ -71,7 +72,9 @@ __global__ void render_init(int max_x, int max_y, curandState *rand_state) {
     curand_init(1984+pixel_index, 0, 0, &rand_state[pixel_index]);
 }
 
-// TODO try split the loop into multiple threads and sum after
+// ? New alg for better performances
+
+// TODO try split the loop into multiple threads and sum after @MIDHU
 __global__ void render(vec3 *frame_buffer, int max_x, int max_y, int num_steps, camera **cam, hitable **world, curandState *rand_state) {
     int i = threadIdx.x + blockIdx.x * blockDim.x;
     int j = threadIdx.y + blockIdx.y * blockDim.y;
@@ -91,6 +94,23 @@ __global__ void render(vec3 *frame_buffer, int max_x, int max_y, int num_steps, 
     col[1] = sqrt(col[1]);
     col[2] = sqrt(col[2]);
     frame_buffer[pixel_index] = col;
+}
+
+// optimized render function - RESULT: NO IMPROVEMENT! @MIDHU
+__global__ void render_optimized(vec3 *frame_buffer, int max_x, int max_y, int num_steps, camera **cam, hitable **world, curandState *rand_state) {
+    int i = threadIdx.x + blockIdx.x * blockDim.x;
+    int j = threadIdx.y + blockIdx.y * blockDim.y;
+    if((i >= max_x) || (j >= max_y)) return;
+    int pixel_index = j*max_x + i;
+    curandState local_rand_state = rand_state[pixel_index];
+    float u = float(i + curand_uniform(&local_rand_state)) / float(max_x);
+    float v = float(j + curand_uniform(&local_rand_state)) / float(max_y);
+    ray r = (*cam)->get_ray(u, v, &local_rand_state);
+    vec3 col = color(r, world, &local_rand_state);
+    rand_state[pixel_index] = local_rand_state;
+    atomicAdd(&frame_buffer[pixel_index].e[0], col.r());
+    atomicAdd(&frame_buffer[pixel_index].e[1], col.g());
+    atomicAdd(&frame_buffer[pixel_index].e[2], col.b());
 }
 
 #define RND (curand_uniform(&local_rand_state))
@@ -147,15 +167,15 @@ __global__ void free_world(hitable **d_list, hitable **d_world, camera **d_camer
     delete *d_camera;
 }
 
-int main() {
+int main(int argc, char const *argv[]){
     int pixels_x = 1200;
     int pixels_y = 800;
     int num_steps = 10;
     int tx = 8;
     int ty = 8;
 
-    std::cerr << "Rendering a " << pixels_x << "x" << pixels_y << " image with " << num_steps << " samples per pixel ";
-    std::cerr << "in " << tx << "x" << ty << " blocks.\n";
+    std::cout << "Rendering a " << pixels_x << "x" << pixels_y << " image with " << num_steps << " samples per pixel ";
+    std::cout << "in " << tx << "x" << ty << " blocks.\n";
 
     int num_pixels = pixels_x*pixels_y;
     size_t fb_size = num_pixels*sizeof(vec3);
@@ -163,6 +183,7 @@ int main() {
     // allocate FB
     vec3 *d_frame_buffer;
     checkCudaErrors(cudaMallocManaged((void **)&d_frame_buffer, fb_size));
+    checkCudaErrors(cudaMemset(d_frame_buffer, 0, fb_size));
 
     // allocate random state
     curandState *d_rand_state;
@@ -191,29 +212,48 @@ int main() {
     start = clock();
     // Render our buffer
 
-    // TODO can be improved maybe possible eventually
+    // TODO can be improved maybe possible eventually @MIDHU
     dim3 blocks(pixels_x/tx+1,pixels_y/ty+1);
     dim3 threads(tx,ty);
     render_init<<<blocks, threads>>>(pixels_x, pixels_y, d_rand_state);
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
-    render<<<blocks, threads>>>(d_frame_buffer, pixels_x, pixels_y,  num_steps, d_camera, d_world, d_rand_state);
+#ifdef USE_OPTIMIZED_RENDER
+    for(int s = 0; s < num_steps; s++) {
+        render_optimized<<<blocks, threads>>>(d_frame_buffer, pixels_x, pixels_y, num_steps, d_camera, d_world, d_rand_state);
+    }
+#else
+    render<<<blocks, threads>>>(d_frame_buffer, pixels_x, pixels_y, num_steps, d_camera, d_world, d_rand_state);
+#endif
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
     stop = clock();
     double timer_seconds = ((double)(stop - start)) / CLOCKS_PER_SEC;
-    std::cerr << "took " << timer_seconds << " seconds.\n";
+    std::cout << "took " << timer_seconds << " seconds.\n";
 
     // Output FB as Image
-    std::cout << "P3\n" << pixels_x << " " << pixels_y << "\n255\n";
-    for (int j = pixels_y-1; j >= 0; j--) {
-        for (int i = 0; i < pixels_x; i++) {
-            size_t pixel_index = j*pixels_x + i;
-            int ir = int(255.99*d_frame_buffer[pixel_index].r());
-            int ig = int(255.99*d_frame_buffer[pixel_index].g());
-            int ib = int(255.99*d_frame_buffer[pixel_index].b());
-            std::cout << ir << " " << ig << " " << ib << "\n";
+    std::ofstream file;
+    if (argc == 2) {
+        std::cout << "Creating file \"" << argv[1] << "\" \n";
+        file.open(argv[1]);
+
+        file << "P3\n" << pixels_x << " " << pixels_y << "\n255\n";
+        for (int j = pixels_y-1; j >= 0; j--) {
+            for (int i = 0; i < pixels_x; i++) {
+                size_t pixel_index = j*pixels_x + i;
+                vec3 col = d_frame_buffer[pixel_index];
+#ifdef USE_OPTIMIZED_RENDER
+                    col /= float(num_steps);
+                    col = vec3(sqrt(col[0]), sqrt(col[1]), sqrt(col[2]));
+#endif
+                int ir = int(255.99*col.r());
+                int ig = int(255.99*col.g());
+                int ib = int(255.99*col.b());
+                file << ir << " " << ig << " " << ib << "\n";
+            }
         }
+
+        file.close();
     }
 
     // clean up

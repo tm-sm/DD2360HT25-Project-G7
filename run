@@ -1,0 +1,19 @@
+#!/usr/bin/env sh
+
+[ -z "$1" ] && OPT="BASELINE" || OPT="$1"
+OPT=`echo "$OPT" | tr " " "\n" | sort | tr "\n" " " | xargs`
+echo "Optimizations: $OPT"
+
+cd src
+make clean
+make DEFINES="$OPT"
+cd ..
+
+mkdir -p "results"
+
+nsys profile -f true -o "results/$OPT.qdstrm" "./src/cudart" "results/$OPT.ppm" 2>&1 | tee "results/$OPT.log"
+/usr/lib/nsight-systems/host-linux-x64/QdstrmImporter -f -i "results/$OPT.qdstrm" -o "results/$OPT.nsys-rep"
+rm "results/$OPT.qdstrm"
+
+# ncu -f -o "results/$OPT" "./src/cudart"
+# "./src/cudart" "results/$OPT.ppm" 2>&1 | tee "results/$OPT.log"

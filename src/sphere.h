@@ -13,7 +13,7 @@ class sphere: public hitable  {
         material *mat_ptr;
 };
 
-// TODO remove sqrt / lookup table
+// TODO remove sqrt / lookup table @corentin
 __device__ bool sphere::hit(const ray& r, float t_min, float t_max, hit_record& rec) const {
     vec3 oc = r.origin() - center;
     float a = dot(r.direction(), r.direction());

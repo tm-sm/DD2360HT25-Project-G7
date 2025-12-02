@@ -13,7 +13,7 @@ class hitable_list: public hitable  {
 };
 
 
-// TODO split world into blocks (opti)
+// TODO split world into blocks (opti) @tim
 __device__ bool hitable_list::hit(const ray& r, float t_min, float t_max, hit_record& rec) const {
         hit_record temp_rec;
         bool hit_anything = false;

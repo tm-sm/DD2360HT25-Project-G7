@@ -1,6 +1,2 @@
-*.ppm
-*.nsys-rep
-*.ncu-rep
-*.qdstrm
-
 .vscode/
+results/
