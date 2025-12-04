@@ -1,5 +1,7 @@
 #include "camera.h"
 #include "hitable_list.h"
+#include "bvh.h"
+#include "aabb.h"
 #include "material.h"
 #include "ray.h"
 #include "sphere.h"
@@ -200,8 +202,11 @@ __global__ void create_world(hitable **d_list, hitable **d_world, camera **d_cam
         d_list[i++] = new sphere(vec3(-4, 1, 0), 1.0, new lambertian(vec3(0.4, 0.2, 0.1)));
         d_list[i++] = new sphere(vec3(4, 1, 0), 1.0, new metal(vec3(0.7, 0.6, 0.5), 0.0));
         *rand_state = local_rand_state;
+#ifndef BVH
+        *d_world = new bvh(d_list, 22 * 22 + 1 + 3);
+#else
         *d_world = new hitable_list(d_list, 22 * 22 + 1 + 3);
-
+#endif
         vec3 lookfrom(13, 2, 3);
         vec3 lookat(0, 0, 0);
         float dist_to_focus = 10.0;
