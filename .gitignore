@@ -1,2 +1,4 @@
 .vscode/
 results/
+cmake-build-debug
+CMakeLists.txt
