@@ -11,7 +11,6 @@ class sphere: public hitable  {
                         center + vec3(radius, radius, radius));
         }
         __device__ virtual bool hit(const ray& r, float tmin, float tmax, hit_record& rec) const;
-        vec3 center;
         float radius;
         material *mat_ptr;
 };

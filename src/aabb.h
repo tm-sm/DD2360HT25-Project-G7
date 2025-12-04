@@ -42,6 +42,17 @@ class AABB{
             min = min_corner;
             max = max_corner;
         }
+
+        __device__ int get_longest_axis() const {
+            float dx = max.x() - min.x();
+            float dy = max.y() - min.y();
+            float dz = max.z() - min.z();
+
+            if (dx >= dy && dx >= dz) return 0;
+            else if (dy >= dz) return 1;
+            else return 2;
+        }
+
         __device__ virtual bool hit(const ray& r, float tmin, float tmax) const;
         vec3 min;
         vec3 max;

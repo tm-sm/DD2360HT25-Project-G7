@@ -20,6 +20,7 @@ class hitable {
         __device__ AABB get_bbox() const { return bbox; }
     protected:
         AABB bbox;
+        vec3 center;
 };
 
 #endif
