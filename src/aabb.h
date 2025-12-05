@@ -1,61 +1,43 @@
 #ifndef AABBH
 #define AABBH
 
+#ifdef BVH
+
 #include <float.h>
 #include "ray.h"
 
+class AABB {
+public:
+    __device__ AABB() :min(0, 0, 0), max(0, 0, 0) {}
+    __device__ AABB(vec3 min, vec3 max) : min(min), max(max) {};
+    __device__ AABB(const AABB& other) : min(other.min), max(other.max) {}
+    __device__ AABB(AABB ab1, AABB ab2) : AABB(ab1) {
+        merge_with(ab2);
+    }
 
-class AABB{
-    public:
-        __device__ AABB() {}
-        __device__ AABB(vec3 mn, vec3 mx) : min(mn), max(mx) {};
-        __device__ AABB(hitable** list, int n) {
-            vec3 min_corner(FLT_MAX, FLT_MAX, FLT_MAX);
-            vec3 max_corner(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+    __device__ void merge_with(const AABB& other) {
+        min.set_x(fminf(min.x(), other.min.x()));
+        min.set_y(fminf(min.y(), other.min.y()));
+        min.set_z(fminf(min.z(), other.min.z()));
 
-            for (int i = 0; i < n; i++) {
-                AABB b = list[i]->bbox();
-                min_corner.x() = fminf(min_corner.x(), b.min.x());
-                min_corner.y() = fminf(min_corner.y(), b.min.y());
-                min_corner.z() = fminf(min_corner.z(), b.min.z());
+        max.set_x(fmaxf(max.x(), other.max.x()));
+        max.set_y(fmaxf(max.y(), other.max.y()));
+        max.set_z(fmaxf(max.z(), other.max.z()));
+    }
 
-                max_corner.x() = fmaxf(max_corner.x(), b.max.x());
-                max_corner.y() = fmaxf(max_corner.y(), b.max.y());
-                max_corner.z() = fmaxf(max_corner.z(), b.max.z());
-            }
+    __device__ int get_longest_axis() const {
+        float dx = max.x() - min.x();
+        float dy = max.y() - min.y();
+        float dz = max.z() - min.z();
 
-            min = min_corner;
-            max = max_corner;
-        };
-        __device__ AABB(AABB ab1, AABB ab2) {
-            vec3 min_corner(FLT_MAX, FLT_MAX, FLT_MAX);
-            vec3 max_corner(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+        if (dx >= dy && dx >= dz) return 0;
+        if (dy >= dz) return 1;
+        return 2;
+    }
 
-            min_corner.x() = fminf(ab1.min.x(), ab2.min.x());
-            min_corner.y() = fminf(ab1.min.y(), ab2.min.y());
-            min_corner.z() = fminf(ab1.min.z(), ab2.min.z());
-
-            max_corner.x() = fmaxf(ab1.max.x(), ab2.max.x());
-            max_corner.y() = fmaxf(ab1.max.y(), ab2.max.y());
-            max_corner.z() = fmaxf(ab1.max.z(), ab2.max.z());
-
-            min = min_corner;
-            max = max_corner;
-        }
-
-        __device__ int get_longest_axis() const {
-            float dx = max.x() - min.x();
-            float dy = max.y() - min.y();
-            float dz = max.z() - min.z();
-
-            if (dx >= dy && dx >= dz) return 0;
-            else if (dy >= dz) return 1;
-            else return 2;
-        }
-
-        __device__ virtual bool hit(const ray& r, float tmin, float tmax) const;
-        vec3 min;
-        vec3 max;
+    __device__ virtual bool hit(const ray& r, float tmin, float tmax) const;
+    vec3 min;
+    vec3 max;
 };
 
 __device__ bool AABB::hit(const ray& r, float t_min, float t_max) const {
@@ -77,4 +59,5 @@ __device__ bool AABB::hit(const ray& r, float t_min, float t_max) const {
 }
 
 
+#endif
 #endif

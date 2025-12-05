@@ -1,6 +1,7 @@
 #include "camera.h"
 #include "hitable_list.h"
 #include "bvh.h"
+#include "bvh_n.h"
 #include "aabb.h"
 #include "material.h"
 #include "ray.h"
@@ -202,8 +203,8 @@ __global__ void create_world(hitable **d_list, hitable **d_world, camera **d_cam
         d_list[i++] = new sphere(vec3(-4, 1, 0), 1.0, new lambertian(vec3(0.4, 0.2, 0.1)));
         d_list[i++] = new sphere(vec3(4, 1, 0), 1.0, new metal(vec3(0.7, 0.6, 0.5), 0.0));
         *rand_state = local_rand_state;
-#ifndef BVH
-        *d_world = new bvh(d_list, 22 * 22 + 1 + 3);
+#ifdef BVH
+        *d_world = new bvh_n(d_list, 22 * 22 + 1 + 3);
 #else
         *d_world = new hitable_list(d_list, 22 * 22 + 1 + 3);
 #endif
@@ -260,6 +261,7 @@ int main(int argc, char const *argv[]) {
     checkCudaErrors(cudaMalloc((void **)&d_rand_state2, 1 * sizeof(curandState)));
 
     // we need that 2nd random state to be initialized for the world creation
+    std::cout << "[1] Initializing the world random generator" << std::endl;
     rand_init<<<1, 1>>>(d_rand_state2);
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
@@ -281,6 +283,7 @@ int main(int argc, char const *argv[]) {
     // Render our buffer
 
     // TODO can be improved maybe possible eventually @MIDHU
+    std::cout << "[2] Initializing the pixels random generator" << std::endl;
 #ifndef PARALLEL_RAYS
     dim3 blocks(pixels_x / tx + 1, pixels_y / ty + 1);
     dim3 threads(tx, ty);
@@ -293,6 +296,7 @@ int main(int argc, char const *argv[]) {
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
 
+    std::cout << "[3] Rendering the frame" << std::endl;
 #ifdef USE_OPTIMIZED_RENDER
     for (int s = 0; s < num_steps; s++) {
         render_optimized<<<blocks, threads>>>(d_frame_buffer, pixels_x, pixels_y, num_steps, d_camera, d_world, d_rand_state);

@@ -16,6 +16,12 @@ public:
         e[3] = 0;
 #endif
     }
+    __host__ __device__ inline void set_x(float x) { e[0] = x; }
+    __host__ __device__ inline void set_y(float y) { e[1] = y; }
+    __host__ __device__ inline void set_z(float z) { e[2] = z; }
+    __host__ __device__ inline void set_r(float r) { e[0] = r; }
+    __host__ __device__ inline void set_g(float g) { e[1] = g; }
+    __host__ __device__ inline void set_b(float b) { e[2] = b; }
     __host__ __device__ inline float x() const { return e[0]; }
     __host__ __device__ inline float y() const { return e[1]; }
     __host__ __device__ inline float z() const { return e[2]; }

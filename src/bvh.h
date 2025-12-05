@@ -1,111 +1,119 @@
 #ifndef BVHH
 #define BVHH
 
+#ifdef BVH
 #include "hitable.h"
 #include "aabb.h"
-
-class bvh_node {
-public:
-    AABB* aabb; //Implement an actual AABB
-    hitable* node;
-    bool isLeaf;
-    bvh_node* left;
-    bvh_node* right;
-};
 
 class bvh : public hitable {
 public:
     __device__ bvh() {}
-    __device__ bvh(hitable** l, int n) {
-        root = build_recursive(l, n);
+    __device__ bvh(hitable* object) {}
+
+    __device__ ~bvh() {
+        if (!isLeaf) {
+            delete _left;
+            delete _right;
+        }
     }
-    __device__ virtual bool hit(const ray& r, float tmin, float tmax, hit_record& rec) const;
-    bvh_node* root;
-protected:
-    __device__ bvh_node* build_recursive(hitable** l, int n) {
-        bvh_node* node = new bvh_node();
+    __device__ bvh(hitable** l, int n) {
         if (n == 1) {
-            node->isLeaf = true;
-            node->node = l[0];
-            node->aabb = AABB(l, 1);
-            return node;
+            isLeaf = true;
+            object = l[0];
+            _bbox = AABB(l[0]->bbox());
+            return;
         }
 
-        AABB* aabb = AABB(l, n);
-        int axis = aabb->get_longest_axis();
+        AABB aabb = AABB(l[0]->bbox());
+        for (int i = 1; i < n; i++)
+            aabb.merge_with(l[i]->bbox());
+
+        int axis = aabb.get_longest_axis();
 
         sort_by_axis(l, n, axis); // It might be more efficient to do it on the CPU
 
-        int m = n/2;
-        bvh_node* left = build_recursive(l, m); // Not sure if we can give this to different cores/threads to parallelize
-        bvh_node* right = build_recursive(l + m, n - m);
+        // n = 3 n/2=1
+        int m = n / 2;
+        _left = new bvh(l, m); // Not sure if we can give this to different cores/threads to parallelize
+        _right = new bvh(l + m, n - m);
 
-        node->isLeaf = false;
-        node->left = left;
-        node->right = right;
-        node->aabb = AABB(left->aabb, right->aabb);
-
-        return node;
+        isLeaf = false;
+        _bbox = AABB(_left->bbox(), _right->bbox());
     }
 
+    __device__ bool hit(const ray& r, float tmin, float tmax, hit_record& rec) const {
+        if (isLeaf) {
+            return object->hit(r, tmin, tmax, rec);
+        }
+        return hit_node(r, tmin, tmax, rec);
+        const bvh* current = this;
+        while (!current->isLeaf) {
+            if (current->_left->bbox().hit(r, tmin, tmax)) current = current->_left;
+            else if (current->_right->bbox().hit(r, tmin, tmax)) current = current->_right;
+            else return false;
+        }
+        return current->object->hit(r, tmin, tmax, rec);
+    }
+    hitable* object;
+    bool isLeaf;
+    bvh* _left;
+    bvh* _right;
+protected:
     __device__ void sort_by_axis(hitable** list, int n, int axis) {
         for (int i = 1; i < n; i++) {
             hitable* obj = list[i];
             float obj_center;
-            if (axis == 0) obj_center = obj->center.x();
-            else if (axis == 1) obj_center = obj->center.y();
-            else obj_center = obj->center.z();
+            if (axis == 0) obj_center = obj->center().x();
+            else if (axis == 1) obj_center = obj->center().y();
+            else obj_center = obj->center().z();
 
             int j = i - 1;
             while (j >= 0) {
                 float j_center;
                 hitable* j_obj = list[j];
-                if (axis == 0) j_center = j_obj->center.x();
-                else if (axis == 1) j_center = j_obj->center.y();
-                else j_center = j_obj->center.z();
+                if (axis == 0) j_center = j_obj->center().x();
+                else if (axis == 1) j_center = j_obj->center().y();
+                else j_center = j_obj->center().z();
 
                 if (j_center > obj_center) {
                     list[j + 1] = list[j];
                     j--;
-                } else {
+                }
+                else {
                     break;
                 }
             }
             list[j + 1] = obj;
         }
     }
-};
 
-__device__ bool bvh::hit_node(bvh_node* node, const ray& r, float t_min, float t_max, hit_record& rec) const {
-    if (!node) return false;
+    __device__ bool hit_node(const ray& r, float t_min, float t_max, hit_record& rec) const {
+        if (!bbox().hit(r, t_min, t_max))
+            return false;
 
-    if (!node->aabb.hit(r, t_min, t_max))
+        if (isLeaf)
+            return object->hit(r, t_min, t_max, rec);
+
+        hit_record left_rec, right_rec;
+        bool hit_left = _left->hit_node(r, t_min, t_max, left_rec);
+        bool hit_right = _right->hit_node(r, t_min, t_max, right_rec);
+
+        if (hit_left && hit_right) {
+            rec = (left_rec.t < right_rec.t) ? left_rec : right_rec;
+            return true;
+        }
+        else if (hit_left) {
+            rec = left_rec;
+            return true;
+        }
+        else if (hit_right) {
+            rec = right_rec;
+            return true;
+        }
+
         return false;
-
-    if (node->isLeaf) {
-        return node->node->hit(r, t_min, t_max, rec);
     }
 
-    hit_record left_rec, right_rec;
-    bool hit_left = hit_node(node->left, r, t_min, t_max, left_rec);
-    bool hit_right = hit_node(node->right, r, t_min, t_max, right_rec);
-
-    if (hit_left && hit_right) {
-        rec = (left_rec.t < right_rec.t) ? left_rec : right_rec;
-        return true;
-    } else if (hit_left) {
-        rec = left_rec;
-        return true;
-    } else if (hit_right) {
-        rec = right_rec;
-        return true;
-    }
-
-    return false;
-}
-
-__device__ bool bvh::hit(const ray& r, float t_min, float t_max, hit_record& rec) const {
-    return hit_node(root, r, t_min, t_max, rec);
-}
-
+};
+#endif
 #endif
