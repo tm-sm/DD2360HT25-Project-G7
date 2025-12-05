@@ -204,7 +204,7 @@ __global__ void create_world(hitable **d_list, hitable **d_world, camera **d_cam
         d_list[i++] = new sphere(vec3(4, 1, 0), 1.0, new metal(vec3(0.7, 0.6, 0.5), 0.0));
         *rand_state = local_rand_state;
 #ifdef BVH
-        *d_world = new bvh_n(d_list, 22 * 22 + 1 + 3);
+        *d_world = new bvh(d_list, 22 * 22 + 1 + 3);
 #else
         *d_world = new hitable_list(d_list, 22 * 22 + 1 + 3);
 #endif

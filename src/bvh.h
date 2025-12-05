@@ -45,7 +45,6 @@ public:
         if (isLeaf) {
             return object->hit(r, tmin, tmax, rec);
         }
-        return hit_node(r, tmin, tmax, rec);
         const bvh* current = this;
         while (!current->isLeaf) {
             if (current->_left->bbox().hit(r, tmin, tmax)) current = current->_left;

@@ -8,7 +8,7 @@
 
 class AABB {
 public:
-    __device__ AABB() :min(0, 0, 0), max(0, 0, 0) {}
+    __device__ AABB() :min(FLT_MAX, FLT_MAX, FLT_MAX), max(FLT_MIN, FLT_MIN, FLT_MIN) {}
     __device__ AABB(vec3 min, vec3 max) : min(min), max(max) {};
     __device__ AABB(const AABB& other) : min(other.min), max(other.max) {}
     __device__ AABB(AABB ab1, AABB ab2) : AABB(ab1) {
