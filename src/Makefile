@@ -3,7 +3,7 @@ HOST_COMPILER  = g++
 NVCC           = nvcc -ccbin $(HOST_COMPILER)
 
 # select one of these for Debug vs. Release
-#NVCC_DBG       = -g -G
+# NVCC_DBG       = -g -G
 NVCC_DBG       =
 
 # Activated optimizations

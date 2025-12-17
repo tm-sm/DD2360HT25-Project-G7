@@ -1,8 +1,8 @@
-#include "camera.h"
-#include "hitable_list.h"
+#include "aabb.h"
 #include "bvh.h"
 #include "bvh_n.h"
-#include "aabb.h"
+#include "camera.h"
+#include "hitable_list.h"
 #include "material.h"
 #include "ray.h"
 #include "sphere.h"
@@ -158,7 +158,7 @@ __global__ void render(vec3 *frame_buffer, int max_x, int max_y, int num_steps, 
 }
 #endif
 
-// optimized render function - RESULT: NO IMPROVEMENT! @MIDHU
+#ifdef USE_OPTIMIZED_RENDER
 __global__ void render_optimized(vec3 *frame_buffer, int max_x, int max_y, int num_steps, camera **cam, hitable **world, curandState *rand_state) {
     int i = threadIdx.x + blockIdx.x * blockDim.x;
     int j = threadIdx.y + blockIdx.y * blockDim.y;
@@ -175,6 +175,7 @@ __global__ void render_optimized(vec3 *frame_buffer, int max_x, int max_y, int n
     atomicAdd(&frame_buffer[pixel_index].e[1], col.g());
     atomicAdd(&frame_buffer[pixel_index].e[2], col.b());
 }
+#endif
 
 #define RND (curand_uniform(&local_rand_state))
 
@@ -203,11 +204,7 @@ __global__ void create_world(hitable **d_list, hitable **d_world, camera **d_cam
         d_list[i++] = new sphere(vec3(-4, 1, 0), 1.0, new lambertian(vec3(0.4, 0.2, 0.1)));
         d_list[i++] = new sphere(vec3(4, 1, 0), 1.0, new metal(vec3(0.7, 0.6, 0.5), 0.0));
         *rand_state = local_rand_state;
-#ifdef BVH
-        *d_world = new bvh(d_list, 22 * 22 + 1 + 3);
-#else
         *d_world = new hitable_list(d_list, 22 * 22 + 1 + 3);
-#endif
         vec3 lookfrom(13, 2, 3);
         vec3 lookat(0, 0, 0);
         float dist_to_focus = 10.0;
@@ -232,12 +229,34 @@ __global__ void free_world(hitable **d_list, hitable **d_world, camera **d_camer
     delete *d_camera;
 }
 
+#ifdef BVH
+__global__ void create_bvh(hitable **d_list, int num_obj, bvh_n **d_bvh, int num_bvh) {
+    if (threadIdx.x != 0 || blockIdx.x != 0)
+        return;
+    for (int i = 0; i < num_bvh; i++)
+        d_bvh[i] = new bvh_n();
+    d_bvh[0]->setup_root(d_list, num_obj);
+    for (int i = 0; i < num_bvh; i++)
+        d_bvh[i]->setup(i, d_bvh, num_bvh);
+}
+__global__ void free_bvh(bvh_n **d_bvh, int num_bvh) {
+    if (threadIdx.x != 0 || blockIdx.x != 0)
+        return;
+    for (int i = 0; i < num_bvh; i++)
+        delete d_bvh[i];
+}
+#endif
+
 int main(int argc, char const *argv[]) {
     int pixels_x = 1200;
     int pixels_y = 800;
     int num_steps = RAYS_PER_PIXEL;
     int tx = THREADS_X;
     int ty = THREADS_Y;
+
+    size_t limit = 0;
+    cudaDeviceGetLimit(&limit, cudaLimitStackSize);
+    cudaDeviceSetLimit(cudaLimitStackSize, limit * 2);
 
     std::cout << "Rendering a " << pixels_x << "x" << pixels_y << " image with " << num_steps << " samples per pixel ";
     std::cout << "in " << tx << "x" << ty << " blocks.\n";
@@ -266,6 +285,7 @@ int main(int argc, char const *argv[]) {
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
 
+    std::cout << "[2] Initializing the world" << std::endl;
     // make our world of hitables & the camera
     hitable **d_list;
     int num_hitables = 22 * 22 + 1 + 3;
@@ -277,13 +297,25 @@ int main(int argc, char const *argv[]) {
     create_world<<<1, 1>>>(d_list, d_world, d_camera, pixels_x, pixels_y, d_rand_state2);
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
+#ifdef BVH
+    int depth = log(num_hitables) / log(BVH_N);
+    int num_bvh = 1;
+    for (int d = 0; d < depth; d++)
+        num_bvh = num_bvh * BVH_N + 1;
+
+    bvh_n **d_bvh;
+    checkCudaErrors(cudaMalloc((void **)&d_bvh, num_bvh * sizeof(bvh_n *)));
+    create_bvh<<<1, 1>>>(d_list, num_hitables, d_bvh, num_bvh);
+    checkCudaErrors(cudaGetLastError());
+    checkCudaErrors(cudaDeviceSynchronize());
+#endif
 
     clock_t start, stop;
     start = clock();
     // Render our buffer
 
     // TODO can be improved maybe possible eventually @MIDHU
-    std::cout << "[2] Initializing the pixels random generator" << std::endl;
+    std::cout << "[3] Initializing the pixels random generator" << std::endl;
 #ifndef PARALLEL_RAYS
     dim3 blocks(pixels_x / tx + 1, pixels_y / ty + 1);
     dim3 threads(tx, ty);
@@ -296,13 +328,15 @@ int main(int argc, char const *argv[]) {
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
 
-    std::cout << "[3] Rendering the frame" << std::endl;
+    std::cout << "[4] Rendering the frame" << std::endl;
 #ifdef USE_OPTIMIZED_RENDER
     for (int s = 0; s < num_steps; s++) {
         render_optimized<<<blocks, threads>>>(d_frame_buffer, pixels_x, pixels_y, num_steps, d_camera, d_world, d_rand_state);
     }
 #elifdef PARALLEL_RAYS
     render<<<blocks, threads, tx * ty * num_steps * sizeof(vec3)>>>(d_frame_buffer, pixels_x, pixels_y, num_steps, d_camera, d_world, d_rand_state);
+#elifdef BVH
+    render<<<blocks, threads>>>(d_frame_buffer, pixels_x, pixels_y, num_steps, d_camera, (hitable**)d_bvh, d_rand_state);
 #else
     render<<<blocks, threads>>>(d_frame_buffer, pixels_x, pixels_y, num_steps, d_camera, d_world, d_rand_state);
 #endif
@@ -315,7 +349,7 @@ int main(int argc, char const *argv[]) {
     // Output FB as Image
     std::ofstream file;
     if (argc == 2) {
-        std::cout << "Creating file \"" << argv[1] << "\" \n";
+        std::cout << "[5] Creating file \"" << argv[1] << "\" \n";
         file.open(argv[1]);
 
         file << "P3\n"
@@ -338,10 +372,16 @@ int main(int argc, char const *argv[]) {
         file.close();
     }
 
-    // clean up
+    std::cout << "[6] Cleaning up" << std::endl;
     checkCudaErrors(cudaDeviceSynchronize());
     free_world<<<1, 1>>>(d_list, d_world, d_camera);
+    checkCudaErrors(cudaDeviceSynchronize());
     checkCudaErrors(cudaGetLastError());
+#ifdef BVH
+    free_bvh<<<1, 1>>>(d_bvh, num_bvh);
+    checkCudaErrors(cudaDeviceSynchronize());
+    checkCudaErrors(cudaGetLastError());
+#endif
     checkCudaErrors(cudaFree(d_camera));
     checkCudaErrors(cudaFree(d_world));
     checkCudaErrors(cudaFree(d_list));

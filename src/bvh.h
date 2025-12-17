@@ -47,8 +47,8 @@ public:
         }
         const bvh* current = this;
         while (!current->isLeaf) {
-            if (current->_left->bbox().hit(r, tmin, tmax)) current = current->_left;
-            else if (current->_right->bbox().hit(r, tmin, tmax)) current = current->_right;
+            if (current->_left->bbox().hit(r)) current = current->_left;
+            else if (current->_right->bbox().hit(r)) current = current->_right;
             else return false;
         }
         return current->object->hit(r, tmin, tmax, rec);
@@ -87,7 +87,7 @@ protected:
     }
 
     __device__ bool hit_node(const ray& r, float t_min, float t_max, hit_record& rec) const {
-        if (!bbox().hit(r, t_min, t_max))
+        if (!bbox().hit(r))
             return false;
 
         if (isLeaf)

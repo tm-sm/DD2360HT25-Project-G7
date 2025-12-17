@@ -13,9 +13,8 @@ public:
 #endif
     {
 #ifdef BVH
-        _bbox = AABB(_center - vec3(radius, radius, radius),
-            _center + vec3(radius, radius, radius));
         _center = cen;
+        _bbox = AABB(cen - vec3(radius, radius, radius), cen + vec3(radius, radius, radius));
 #endif
     }
     __device__ virtual bool hit(const ray& r, float tmin, float tmax, hit_record& rec) const;
