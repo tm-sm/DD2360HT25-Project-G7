@@ -48,7 +48,6 @@ void check_cuda(cudaError_t result, char const *const func, const char *const fi
 __device__ vec3 color(const ray &r, hitable **world, curandState *local_rand_state) {
     ray cur_ray = r;
     vec3 cur_attenuation = vec3(1.0, 1.0, 1.0);
-    // TODO 10 seams to be a sweet spot
     for (int i = 0; i < BOUNCES; i++) {
         hit_record rec;
         if ((*world)->hit(cur_ray, 0.001f, FLT_MAX, rec)) {
@@ -56,7 +55,11 @@ __device__ vec3 color(const ray &r, hitable **world, curandState *local_rand_sta
             vec3 attenuation;
             if (rec.mat_ptr->scatter(cur_ray, rec, attenuation, scattered, local_rand_state)) {
                 cur_attenuation *= attenuation;
-                cur_ray = scattered;
+#ifdef SMART_BOUNCES
+                if (cur_attenuation.squared_length() < 0.0003)
+                    return vec3(0.0, 0.0, 0.0);
+#endif
+                    cur_ray = scattered;
             } else {
                 return vec3(0.0, 0.0, 0.0);
             }
@@ -113,9 +116,7 @@ __global__ void render(vec3 *frame_buffer, int max_x, int max_y, int num_steps, 
     curandState local_rand_state = rand_state[pixel_index];
     vec3 col(0, 0, 0);
     for (int s = 0; s < num_steps; s++) {
-        float u = float(i + curand_uniform(&local_rand_state)) / float(max_x);
-        float v = float(j + curand_uniform(&local_rand_state)) / float(max_y);
-        ray r = (*cam)->get_ray(u, v, &local_rand_state);
+        ray r = (*cam)->get_ray(i / (float)max_x, j / (float)max_y, &local_rand_state);
         col += color(r, world, &local_rand_state);
     }
     rand_state[pixel_index] = local_rand_state;
