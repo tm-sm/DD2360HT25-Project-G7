@@ -1,0 +1,9 @@
+WARNING: CPU IP/backtrace sampling not supported, disabling.
+Try the 'nsys status --environment' command to learn more.
+
+WARNING: CPU context switch tracing not supported, disabling.
+Try the 'nsys status --environment' command to learn more.
+
+Rendering a 1200x800 image with 10 samples per pixel in 8x8 blocks.
+took 0.687387 seconds.
+Creating file "results/BOUNCES=10 FAST_MATH PARALLEL_RAYS$.ppm" 

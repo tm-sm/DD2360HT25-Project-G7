@@ -1,0 +1,3 @@
+Rendering a 1200x800 image with 10 samples per pixel in 8x8 blocks.
+took 1.97011 seconds.
+Creating file "results/USE_OPTIMIZED_RENDER.ppm" 

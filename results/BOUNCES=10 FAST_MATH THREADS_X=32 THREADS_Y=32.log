@@ -1,0 +1,14 @@
+WARNING: CPU IP/backtrace sampling not supported, disabling.
+Try the 'nsys status --environment' command to learn more.
+
+WARNING: CPU context switch tracing not supported, disabling.
+Try the 'nsys status --environment' command to learn more.
+
+Rendering a 1200x800 image with 10 samples per pixel in 32x32 blocks.
+took 0.818987 seconds.
+Creating file "results/BOUNCES=10 FAST_MATH THREADS_X=32 THREADS_Y=32.ppm" 
+Importer error status: The importer binary and its dependencies were not found.
+Unable to retrieve the importer version: skipping importation of the QDSTRM file.
+Generating '/tmp/nsys-report-4073.qdstrm'
+Generated:
+    /home/coco/Documents/INSA/5A/DD2360__Applied-GPU-Programming/Project/results/BOUNCES=10 FAST_MATH THREADS_X=32 THREADS_Y=32.qdstrm
