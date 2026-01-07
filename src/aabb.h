@@ -34,10 +34,14 @@ public:
     }
 
     __device__ virtual bool hit(const ray& r) const;
+
+    // Stores the bottom corner with min values (index 0), and the upper corner with max values (index 1)
     vec3 bounds[2];
 };
 
 __device__ bool AABB::hit(const ray& r) const {
+    // Slab method based off of the following article
+    // https://tavianator.com/2011/ray_box.html
     vec3 invdir = vec3(1, 1, 1) / r.direction();
     float tmin, tmax, tymin, tymax, tzmin, tzmax;
     int sign[3] = {
@@ -51,6 +55,7 @@ __device__ bool AABB::hit(const ray& r) const {
     tymin = (bounds[sign[1]].y() - r.origin().y()) * invdir.y();
     tymax = (bounds[1 - sign[1]].y() - r.origin().y()) * invdir.y();
 
+    // Check if the XY interval is inside the box
     if ((tmin > tymax) || (tymin > tmax))
         return false;
 
@@ -62,13 +67,9 @@ __device__ bool AABB::hit(const ray& r) const {
     tzmin = (bounds[sign[2]].z() - r.origin().z()) * invdir.z();
     tzmax = (bounds[1 - sign[2]].z() - r.origin().z()) * invdir.z();
 
+    // Check if the Z interval is also inside the box
     if ((tmin > tzmax) || (tzmin > tmax))
         return false;
-
-    if (tzmin > tmin)
-        tmin = tzmin;
-    if (tzmax < tmax)
-        tmax = tzmax;
 
     return true;
 }

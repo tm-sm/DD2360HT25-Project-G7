@@ -7,11 +7,11 @@
 ## Compiling
 Inside the `src` directory, execute
 ```bash
-make [defines=DEFINES]
+make [DEFINES=DEFINES]
 ```
 Where `DEFINES` is a space separated list the the [possible optimisations](#possible-optimizations). Surround the list in quotes `"` if needed, e.g.
 ```
-make defines="BOUNCES=10 SMART_BOUNCES"
+make DEFINES="BOUNCES=10 SMART_BOUNCES"
 ```
 
 ## Profiling and Testing
@@ -22,7 +22,7 @@ Use the `run` script at the root of th project to quickly test optimisations. **
 
 Where `OPTIMIZATIONS` is a space separated list the the [possible optimisations](#possible-optimizations). Surround the list in quotes `"` if needed, e.g.
 ```
-make defines="BOUNCES=10 SMART_BOUNCES"
+./run "BOUNCES=10 SMART_BOUNCES"
 ```
 The following aliases are also available when executing `run`
 - `BEST`: `FAST_MATH BOUNCES=10 SMART_BOUNCES BVH THREADS_Y=4`

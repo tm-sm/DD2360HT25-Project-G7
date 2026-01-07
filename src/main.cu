@@ -83,7 +83,6 @@ __device__ vec3 color(const ray &r, hitable **world, curandState *local_rand_sta
 #else
     vec3 cur_attenuation = vec3(1.0, 1.0, 1.0);
 #endif
-    // TODO 10 seams to be a sweet spot
     for (int i = 0; i < BOUNCES; i++) {
         hit_record rec;
 #ifdef REDUCED_PRECISION
@@ -96,8 +95,10 @@ __device__ vec3 color(const ray &r, hitable **world, curandState *local_rand_sta
             if (rec.mat_ptr->scatter(cur_ray, rec, attenuation, scattered, local_rand_state)) {
                 cur_attenuation *= attenuation;
 #ifdef SMART_BOUNCES
-                if (cur_attenuation.squared_length() < 0.0003)
-                    return vec3(0.0, 0.0, 0.0);
+                // Return early if the color is black, a the only return involving cur_attenuation multiplie it by another color
+                // and every other return return black already
+                if (cur_attenuation.r() < 0.001 && cur_attenuation.g() < 0.001 && cur_attenuation.b() < 0.001)
+                    return cur_attenuation;
 #endif
                 cur_ray = scattered;
             } else {
@@ -156,11 +157,9 @@ __global__ void render_init(int max_x, int max_y, int max_s, curandState *rand_s
     curand_init(1984 + pixel_index, 0, 0, &rand_state[pixel_index]);
 }
 
-// ? New alg for better performances
-
-// TODO try split the loop into multiple threads and sum after @MIDHU
 #ifndef PARALLEL_RAYS
 __global__ void render(vec3 *frame_buffer, int max_x, int max_y, int num_steps, camera **cam, hitable **world, curandState *rand_state) {
+    // Determine pixel coordinated (i, j)
     int i = threadIdx.x + blockIdx.x * blockDim.x;
     int j = threadIdx.y + blockIdx.y * blockDim.y;
     if ((i >= max_x) || (j >= max_y))
@@ -168,12 +167,16 @@ __global__ void render(vec3 *frame_buffer, int max_x, int max_y, int num_steps, 
     int pixel_index = j * max_x + i;
     curandState local_rand_state = rand_state[pixel_index];
 #ifdef REDUCED_PRECISION
+    // Initialize empty color vector for the pixel (FP16)
     vec3 col(__float2half(0.0f), __float2half(0.0f), __float2half(0.0f));
 #else
+    // Initialize empty color vector for the pixel (FP32)
     vec3 col(0, 0, 0);
 #endif
+    // Each thread computes all samples for its pixel one by one
     for (int s = 0; s < num_steps; s++) {
 #ifdef REDUCED_PRECISION
+        // Jitter the ray slightly (offsetting) for anti-aliasing
         half u = __float2half(float(i + curand_uniform(&local_rand_state)) / float(max_x));
         half v = __float2half(float(j + curand_uniform(&local_rand_state)) / float(max_y));
 #else
@@ -185,11 +188,13 @@ __global__ void render(vec3 *frame_buffer, int max_x, int max_y, int num_steps, 
     }
     rand_state[pixel_index] = local_rand_state;
 #ifdef REDUCED_PRECISION
+    // Average color and apply correction (sqrt) - FP16
     col /= __float2half(float(num_steps));
     col[0] = hsqrt(col[0]);
     col[1] = hsqrt(col[1]);
     col[2] = hsqrt(col[2]);
 #else
+    // Same as above with FP32 
     col /= float(num_steps);
     col[0] = sqrt(col[0]);
     col[1] = sqrt(col[1]);
@@ -199,8 +204,10 @@ __global__ void render(vec3 *frame_buffer, int max_x, int max_y, int num_steps, 
 }
 #else
 __global__ void render(vec3 *frame_buffer, int max_x, int max_y, int num_steps, camera **cam, hitable **world, curandState *rand_state) {
+    // Determine pixel coordinated (i, j)
     int i = threadIdx.x + blockIdx.x * blockDim.x;
     int j = threadIdx.y + blockIdx.y * blockDim.y;
+    // Index of sample (ray) within the pixel
     int k = threadIdx.z;
     if ((i >= max_x) || (j >= max_y) || (k >= num_steps))
         return;
@@ -208,11 +215,14 @@ __global__ void render(vec3 *frame_buffer, int max_x, int max_y, int num_steps, 
     int random_index = j * max_x * num_steps + i * num_steps + k;
     curandState local_rand_state = rand_state[random_index];
 
+    // Shared memory (stores every color before summing)
     __shared__ vec3 col_per_ray[THREADS_Y][THREADS_X][RAYS_PER_PIXEL];
 #ifdef REDUCED_PRECISION
+    // Generate and trace exactly ONE ray per thread (FP16)
     half u = __float2half(float(i + curand_uniform(&local_rand_state)) / float(max_x));
     half v = __float2half(float(j + curand_uniform(&local_rand_state)) / float(max_y));
 #else
+    // Generate and trace exactly ONE ray per thread (FP32)
     float u = float(i + curand_uniform(&local_rand_state)) / float(max_x);
     float v = float(j + curand_uniform(&local_rand_state)) / float(max_y);
 #endif
@@ -222,12 +232,16 @@ __global__ void render(vec3 *frame_buffer, int max_x, int max_y, int num_steps, 
 
     if (k != 0)
         return;
+
+    // Ensure every thread has finished its ray cast
     __syncthreads();
 #ifdef REDUCED_PRECISION
     vec3 col(__float2half(0.0f), __float2half(0.0f), __float2half(0.0f));
 #else
     vec3 col(0, 0, 0);
 #endif
+
+    // Compute the final pixel color
     for (int s = 0; s < num_steps; s++) {
         col += col_per_ray[threadIdx.y][threadIdx.x][s];
     }
@@ -248,22 +262,29 @@ __global__ void render(vec3 *frame_buffer, int max_x, int max_y, int num_steps, 
 
 #ifdef OPTIMIZED_RENDER
 __global__ void render_optimized(vec3 *frame_buffer, int max_x, int max_y, int num_steps, camera **cam, hitable **world, curandState *rand_state) {
+    // Calaculate unique pixel coordinates for the thread
     int i = threadIdx.x + blockIdx.x * blockDim.x;
     int j = threadIdx.y + blockIdx.y * blockDim.y;
+    // Boundary Check (ensure threads outside the image dimensions do nothing)
     if ((i >= max_x) || (j >= max_y))
         return;
     int pixel_index = j * max_x + i;
+    // Load random state for this specific pixel into local register memory
     curandState local_rand_state = rand_state[pixel_index];
 #ifdef REDUCED_PRECISION
+    // Add a small offset to the coordinates to smooth out edges (Anti-Aliasing)
     half u = __float2half(float(i + curand_uniform(&local_rand_state)) / float(max_x));
     half v = __float2half(float(j + curand_uniform(&local_rand_state)) / float(max_y));
 #else
+    // Same as above with FP32 precision
     float u = float(i + curand_uniform(&local_rand_state)) / float(max_x);
     float v = float(j + curand_uniform(&local_rand_state)) / float(max_y);
 #endif
+    // Ray and path casting
     ray r = (*cam)->get_ray(u, v, &local_rand_state);
     vec3 col = color(r, world, &local_rand_state);
     rand_state[pixel_index] = local_rand_state;
+    // Atomic adding (avoid data races)
     atomicAdd(&frame_buffer[pixel_index].e[0], col.r());
     atomicAdd(&frame_buffer[pixel_index].e[1], col.g());
     atomicAdd(&frame_buffer[pixel_index].e[2], col.b());
@@ -272,13 +293,16 @@ __global__ void render_optimized(vec3 *frame_buffer, int max_x, int max_y, int n
 
 #define RND (curand_uniform(&local_rand_state))
 
+// Instantiates the world with geometry and camera objects (using either standard or half precision)
 __global__ void create_world(hitable **d_list, hitable **d_world, camera **d_camera, int nx, int ny, curandState *rand_state) {
     if (threadIdx.x == 0 && blockIdx.x == 0) {
         curandState local_rand_state = *rand_state;
 #ifdef REDUCED_PRECISION
+        // Creates a sphere at (0, -1000, -1) with radius 1000 (large radius = appears as flat surface)
         d_list[0] = new sphere(vec3(__float2half(0.0f), __float2half(-1000.0f), __float2half(-1.0f)), __float2half(1000.0f),
                                new lambertian(vec3(__float2half(0.5f), __float2half(0.5f), __float2half(0.5f))));
 #else
+        // Same as above with standard precision
         d_list[0] = new sphere(vec3(0, -1000.0, -1), 1000,
                                new lambertian(vec3(0.5, 0.5, 0.5)));
 #endif
@@ -286,18 +310,24 @@ __global__ void create_world(hitable **d_list, hitable **d_world, camera **d_cam
         for (int a = -11; a < 11; a++) {
             for (int b = -11; b < 11; b++) {
 #ifdef REDUCED_PRECISION
+                // Converting random float to 16-bit half precision float
                 half choose_mat = __float2half(RND);
                 vec3 center(__float2half(a + RND), __float2half(0.2f), __float2half(b + RND));
+                // Defining probabilities of materials for the spheres
                 if (choose_mat < __float2half(0.8f)) {
+                    // 80% chance for Lambertian (diffuse/matte) material
                     d_list[i++] = new sphere(center, __float2half(0.2f),
                                              new lambertian(vec3(__float2half(RND * RND), __float2half(RND * RND), __float2half(RND * RND))));
                 } else if (choose_mat < __float2half(0.95f)) {
+                    // 15% chance for metal material
                     d_list[i++] = new sphere(center, __float2half(0.2f),
                                              new metal(vec3(__float2half(0.5f * (1.0f + RND)), __float2half(0.5f * (1.0f + RND)), __float2half(0.5f * (1.0f + RND))), __float2half(0.5f * RND)));
                 } else {
+                    // 5% chance for glass (dielectric) material
                     d_list[i++] = new sphere(center, __float2half(0.2f), new dielectric(__float2half(1.5f)));
                 }
 #else
+                // Same logic as above with FP32 (full-precision)
                 float choose_mat = RND;
                 vec3 center(a + RND, 0.2, b + RND);
                 if (choose_mat < 0.8f) {
@@ -313,10 +343,14 @@ __global__ void create_world(hitable **d_list, hitable **d_world, camera **d_cam
             }
         }
 #ifdef REDUCED_PRECISION
+        // Central glass sphere
         d_list[i++] = new sphere(vec3(__float2half(0.0f), __float2half(1.0f), __float2half(0.0f)), __float2half(1.0f), new dielectric(__float2half(1.5f)));
+        // Left matte sphere
         d_list[i++] = new sphere(vec3(__float2half(-4.0f), __float2half(1.0f), __float2half(0.0f)), __float2half(1.0f), new lambertian(vec3(__float2half(0.4f), __float2half(0.2f), __float2half(0.1f))));
+        // Right metal sphere
         d_list[i++] = new sphere(vec3(__float2half(4.0f), __float2half(1.0f), __float2half(0.0f)), __float2half(1.0f), new metal(vec3(__float2half(0.7f), __float2half(0.6f), __float2half(0.5f)), __float2half(0.0f)));
 #else
+        // Same logic as above with FP32
         d_list[i++] = new sphere(vec3(0, 1, 0), 1.0, new dielectric(1.5));
         d_list[i++] = new sphere(vec3(-4, 1, 0), 1.0, new lambertian(vec3(0.4, 0.2, 0.1)));
         d_list[i++] = new sphere(vec3(4, 1, 0), 1.0, new metal(vec3(0.7, 0.6, 0.5), 0.0));
@@ -324,10 +358,14 @@ __global__ void create_world(hitable **d_list, hitable **d_world, camera **d_cam
         *rand_state = local_rand_state;
         *d_world = new hitable_list(d_list, 22 * 22 + 1 + 3);
 #ifdef REDUCED_PRECISION
+        // Physical location of the camera in the 3D world
         vec3 lookfrom(__float2half(13.0f), __float2half(2.0f), __float2half(3.0f));
+        // The point the camera is pointed at (center of world)
         vec3 lookat(__float2half(0.0f), __float2half(0.0f), __float2half(0.0f));
+        // Distance to the plane where the image is perfectly in focus
         half dist_to_focus = __float2half(10.0f);
         (lookfrom - lookat).length();
+        // Size of the lens and camera initialization
         half aperture = __float2half(0.1f);
         *d_camera = new camera(lookfrom,
                                lookat,
@@ -337,6 +375,7 @@ __global__ void create_world(hitable **d_list, hitable **d_world, camera **d_cam
                                aperture,
                                dist_to_focus);
 #else
+        // Same as above for FP32 precision
         vec3 lookfrom(13, 2, 3);
         vec3 lookat(0, 0, 0);
         float dist_to_focus = 10.0;
@@ -353,6 +392,7 @@ __global__ void create_world(hitable **d_list, hitable **d_world, camera **d_cam
     }
 }
 
+// Delete all the scene resources that were created
 __global__ void free_world(hitable **d_list, hitable **d_world, camera **d_camera) {
     for (int i = 0; i < 22 * 22 + 1 + 3; i++) {
         delete ((sphere *)d_list[i])->mat_ptr;
@@ -362,16 +402,20 @@ __global__ void free_world(hitable **d_list, hitable **d_world, camera **d_camer
     delete *d_camera;
 }
 
+
 #ifdef BVH
+// Builds the BVH by initializing nodes and recursively partitioning the scene objects
 __global__ void create_bvh(hitable **d_list, int num_obj, bvh_n **d_bvh, int num_bvh) {
     if (threadIdx.x != 0 || blockIdx.x != 0)
         return;
+    // since a setting up a nodea requires their children to be instantiated, we need to create the entire tree and then setup every node
     for (int i = 0; i < num_bvh; i++)
         d_bvh[i] = new bvh_n();
     d_bvh[0]->setup_root(d_list, num_obj);
     for (int i = 0; i < num_bvh; i++)
         d_bvh[i]->setup(i, d_bvh, num_bvh);
 }
+// Recursively deletes the BVH nodes that were created
 __global__ void free_bvh(bvh_n **d_bvh, int num_bvh) {
     if (threadIdx.x != 0 || blockIdx.x != 0)
         return;
@@ -381,6 +425,7 @@ __global__ void free_bvh(bvh_n **d_bvh, int num_bvh) {
 #endif
 
 int main(int argc, char const *argv[]) {
+    // Change the image size if needed
     int pixels_x = 1200;
     int pixels_y = 800;
     int num_steps = RAYS_PER_PIXEL;
@@ -397,12 +442,12 @@ int main(int argc, char const *argv[]) {
     int num_pixels = pixels_x * pixels_y;
     size_t fb_size = num_pixels * sizeof(vec3);
 
-    // allocate FB
+    // Allocate Frame Buffer (FB)
     vec3 *d_frame_buffer;
     checkCudaErrors(cudaMallocManaged((void **)&d_frame_buffer, fb_size));
     checkCudaErrors(cudaMemset(d_frame_buffer, 0, fb_size));
 
-    // allocate random state
+    // Allocate Random State
     curandState *d_rand_state;
 #ifndef PARALLEL_RAYS
     checkCudaErrors(cudaMalloc((void **)&d_rand_state, num_pixels * sizeof(curandState)));
@@ -412,14 +457,14 @@ int main(int argc, char const *argv[]) {
     curandState *d_rand_state2;
     checkCudaErrors(cudaMalloc((void **)&d_rand_state2, 1 * sizeof(curandState)));
 
-    // we need that 2nd random state to be initialized for the world creation
+    // We need that 2nd random state to be initialized for the world creation
     std::cout << "[1] Initializing the world random generator" << std::endl;
     rand_init<<<1, 1>>>(d_rand_state2);
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
 
     std::cout << "[2] Initializing the world" << std::endl;
-    // make our world of hitables & the camera
+    // Make our world of hitables & the camera
     hitable **d_list;
     int num_hitables = 22 * 22 + 1 + 3;
     checkCudaErrors(cudaMalloc((void **)&d_list, num_hitables * sizeof(hitable *)));
@@ -431,11 +476,15 @@ int main(int argc, char const *argv[]) {
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
 #ifdef BVH
+    // compute the min depth neccessary to store every sphere, knowing the every layer l stores BVH_N^l elements
     int depth = log(num_hitables) / log(BVH_N);
+    
+    // computes the total number of bvh_n instance needed in our tree
     int num_bvh = 1;
     for (int d = 0; d < depth; d++)
-        num_bvh = num_bvh * BVH_N + 1;
-
+    num_bvh = num_bvh * BVH_N + 1;
+    
+    // allocates the memory for the bvh_n tree
     bvh_n **d_bvh;
     checkCudaErrors(cudaMalloc((void **)&d_bvh, num_bvh * sizeof(bvh_n *)));
     create_bvh<<<1, 1>>>(d_list, num_hitables, d_bvh, num_bvh);
@@ -447,13 +496,13 @@ int main(int argc, char const *argv[]) {
     start = clock();
     // Render our buffer
 
-    // TODO can be improved maybe possible eventually @MIDHU
     std::cout << "[3] Initializing the pixels random generator" << std::endl;
 #ifndef PARALLEL_RAYS
     dim3 blocks(pixels_x / tx + 1, pixels_y / ty + 1);
     dim3 threads(tx, ty);
     render_init<<<blocks, threads>>>(pixels_x, pixels_y, d_rand_state);
 #else
+    // use a 3d grid of tx * ty * num_steps instead of a 2d grid
     dim3 blocks(pixels_x / tx + 1, pixels_y / ty + 1, 1);
     dim3 threads(tx, ty, num_steps);
     render_init<<<blocks, threads>>>(pixels_x, pixels_y, num_steps, d_rand_state);
@@ -463,14 +512,18 @@ int main(int argc, char const *argv[]) {
 
     std::cout << "[4] Rendering the frame" << std::endl;
 #ifdef OPTIMIZED_RENDER
+    // Call render 5 times and do a single pass each times
     for (int s = 0; s < num_steps; s++) {
         render_optimized<<<blocks, threads>>>(d_frame_buffer, pixels_x, pixels_y, num_steps, d_camera, d_world, d_rand_state);
     }
 #elifdef PARALLEL_RAYS
+    // Specify the correct amount of shared memory: sizeof(vec3) bytes per pixel per step
     render<<<blocks, threads, tx * ty * num_steps * sizeof(vec3)>>>(d_frame_buffer, pixels_x, pixels_y, num_steps, d_camera, d_world, d_rand_state);
 #elifdef BVH
+    // Render using BVH tree (instead of a raw list)t
     render<<<blocks, threads>>>(d_frame_buffer, pixels_x, pixels_y, num_steps, d_camera, (hitable **)d_bvh, d_rand_state);
 #else
+    // Standard rendering
     render<<<blocks, threads>>>(d_frame_buffer, pixels_x, pixels_y, num_steps, d_camera, d_world, d_rand_state);
 #endif
     checkCudaErrors(cudaGetLastError());
@@ -485,15 +538,18 @@ int main(int argc, char const *argv[]) {
         std::cout << "[5] Creating file \"" << argv[1] << "\" \n";
         file.open(argv[1]);
 
+        // PPM Header: ASCII color (P3) - Width & Height - Max Color Value 
         file << "P3\n"
              << pixels_x << " " << pixels_y << "\n255\n";
         for (int j = pixels_y - 1; j >= 0; j--) {
             for (int i = 0; i < pixels_x; i++) {
                 size_t pixel_index = j * pixels_x + i;
                 vec3 col = d_frame_buffer[pixel_index];
+
 #ifdef OPTIMIZED_RENDER
 #ifdef REDUCED_PRECISION
-                col /= __float2half(float(num_steps));
+// Average the color by the number of samples and apply 
+orrection ([h]sqrt) (to make shadows look cleaner)                col /= __float2half(float(num_steps));
                 col = vec3(hsqrt(col[0]), hsqrt(col[1]), hsqrt(col[2]));
 #else
                 col /= float(num_steps);
@@ -501,7 +557,8 @@ int main(int argc, char const *argv[]) {
 #endif
 #endif
 #ifdef REDUCED_PRECISION
-                int ir = int(255.99 * __half2float(col.r()));
+                int ir =
+// Colors need to be precise and thus converting back to float int(255.99 * __half2float(col.r()));
                 int ig = int(255.99 * __half2float(col.g()));
                 int ib = int(255.99 * __half2float(col.b()));
 #else
@@ -516,7 +573,7 @@ int main(int argc, char const *argv[]) {
         file.close();
     }
 
-    std::cout << "[6] Cleaning up" << std::endl;
+    // Cleanup: Call free_world kernel to delete objects created    std::cout << "[6] Cleaning up" << std::endl;
     checkCudaErrors(cudaDeviceSynchronize());
     free_world<<<1, 1>>>(d_list, d_world, d_camera);
     checkCudaErrors(cudaDeviceSynchronize());
@@ -526,6 +583,7 @@ int main(int argc, char const *argv[]) {
     checkCudaErrors(cudaDeviceSynchronize());
     checkCudaErrors(cudaGetLastError());
 #endif
+    // Free all allocated device memory
     checkCudaErrors(cudaFree(d_camera));
     checkCudaErrors(cudaFree(d_world));
     checkCudaErrors(cudaFree(d_list));

@@ -13,7 +13,6 @@ class hitable_list_half: public hitable_half  {
 };
 
 
-// TODO split world into blocks (opti) @tim
 __device__ bool hitable_list_half::hit(const ray_half& r, half t_min, half t_max, hit_record_half& rec) const {
         hit_record_half temp_rec;
         bool hit_anything = false;

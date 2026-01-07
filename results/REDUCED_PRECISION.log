@@ -9,11 +9,11 @@ Rendering a 1200x800 image with 10 samples per pixel in 8x8 blocks.
 [2] Initializing the world
 [3] Initializing the pixels random generator
 [4] Rendering the frame
-took 1.85824 seconds.
+took 1.86547 seconds.
 [5] Creating file "results/REDUCED_PRECISION.ppm" 
 [6] Cleaning up
 Importer error status: The importer binary and its dependencies were not found.
 Unable to retrieve the importer version: skipping importation of the QDSTRM file.
-Generating '/tmp/nsys-report-182d.qdstrm'
+Generating '/tmp/nsys-report-8b91.qdstrm'
 Generated:
-    /home/coco/Documents/INSA/5A/DD2360__Applied-GPU-Programming/Project/results/EDUCED_PRECISION.qdstrm
+    /home/coco/Documents/INSA/5A/DD2360__Applied-GPU-Programming/Project/results/REDUCED_PRECISION.qdstrm

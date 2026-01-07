@@ -65,11 +65,6 @@ __device__ bool AABB_half::hit(const ray_half& r) const {
     if ((tmin > tzmax) || (tzmin > tmax))
         return false;
 
-    if (tzmin > tmin)
-        tmin = tzmin;
-    if (tzmax < tmax)
-        tmax = tzmax;
-
     return true;
 }
 #endif

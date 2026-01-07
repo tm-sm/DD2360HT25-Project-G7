@@ -29,13 +29,9 @@ __device__ bool refract(const vec3& v, const vec3& n, float ni_over_nt, vec3& re
 
 __device__ vec3 random_in_unit_sphere(curandState* local_rand_state) {
     vec3 p;
-    // float l;
     do {
         p = 2.0f * RANDVEC3 - vec3(1, 1, 1);
     } while (p.squared_length() >= 1.0f);
-    // TODO DOES NO WORKY, PLS ME FIXY WITH TRIGONOMETRY @tim
-    // p = 2.0f * RANDVEC3 - vec3(1, 1, 1);
-    // l = p.length();
     return p;
 }
 

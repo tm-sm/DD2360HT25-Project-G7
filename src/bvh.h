@@ -5,6 +5,8 @@
 #include "hitable.h"
 #include "aabb.h"
 
+// This was our original implementation of a BVH, and was later replaced by bvh_n as it did not work properly
+
 class bvh : public hitable {
 public:
     __device__ bvh() {}

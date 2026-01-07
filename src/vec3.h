@@ -13,7 +13,7 @@ public:
     __host__ __device__ vec3(float e0, float e1, float e2) {
         e[0] = e0; e[1] = e1; e[2] = e2;
 #ifdef LENGTH_CACHING
-        e[3] = 0;
+        e[3] = 0; // A cached value of 0 means no value has been computed yet
 #endif
     }
     __host__ __device__ inline void set_x(float x) { e[0] = x; }
@@ -157,6 +157,7 @@ __host__ __device__ inline vec3& vec3::operator/=(const float t) {
 }
 #ifdef LENGTH_CACHING
 __host__ __device__ inline float vec3::length() {
+    // cache the value if the cache is not set
     if (e[3] == 0) e[3] = sqrt(squared_length());
     return e[3];
 }

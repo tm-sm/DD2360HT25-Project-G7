@@ -1,20 +1,27 @@
 #!/usr/bin/env sh
 
+# Uses the BEST optimisation if nothing is selected
 [ -z "$1" ] && OPT="BEST" || OPT="$1"
+
+# Replaces BEST by the actual optimisations
 OPT=`echo "$OPT" | sed "s/BEST/FAST_MATH BOUNCES=10 SMART_BOUNCES BVH THREADS_Y=4/"`
 
+# Sort them to get a standardized file name
 OPT=`echo "$OPT" | tr " " "\n" | sort | tr "\n" " " | xargs`
 echo "Optimizations: $OPT"
 
 
+# Build the code
 cd src
 make clean
 make DEFINES="$OPT"
 cd ..
 
+# Ensures the output directory exists
 OUT_DIR="results"
 mkdir -p "$OUT_DIR"
 
+# Runs the code, redirecting the output to a log file
 nsys profile -f true -o "$OUT_DIR/$OPT.qdstrm" "./src/cudart" "$OUT_DIR/$OPT.ppm" 2>&1 | tee "$OUT_DIR/$OPT.log"
 /usr/lib/nsight-systems/host-linux-x64/QdstrmImporter -f -i "$OUT_DIR/$OPT.qdstrm" -o "$OUT_DIR/$OPT.nsys-rep"
 rm "$OUT_DIR/$OPT.qdstrm"
