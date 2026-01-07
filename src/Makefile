@@ -29,7 +29,7 @@ cudart_half: cudart_half.o
 	$(NVCC) $(NVCCFLAGS) $(GENCODE_FLAGS) -o cudart_half cudart_half.o
 
 cudart_half.o: $(SRCS) $(INCS)
-	$(NVCC) $(NVCCFLAGS) -DUSE_REDUCED_PRECISION $(GENCODE_FLAGS) -o cudart_half.o -c main.cu
+	$(NVCC) $(NVCCFLAGS) $(GENCODE_FLAGS) -o cudart_half.o -c main.cu
 
 .PHONY: out.ppm
 .PHONY: out_half.ppm

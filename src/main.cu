@@ -1,13 +1,13 @@
-#ifdef USE_REDUCED_PRECISION
-#include "vec3_half.h"
-#include "ray_half.h"
+#ifdef REDUCED_PRECISION
 #include "aabb_half.h"
+#include "bvh_half.h"
+#include "camera_half.h"
 #include "hitable_half.h"
 #include "hitable_list_half.h"
 #include "material_half.h"
+#include "ray_half.h"
 #include "sphere_half.h"
-#include "camera_half.h"
-#include "bvh_half.h"
+#include "vec3_half.h"
 
 typedef vec3_half vec3;
 typedef ray_half ray;
@@ -31,12 +31,12 @@ typedef bvh_half bvh;
 #include "bvh.h"
 #include "bvh_n.h"
 #include "camera.h"
+#include "hitable.h"
 #include "hitable_list.h"
 #include "material.h"
 #include "ray.h"
 #include "sphere.h"
 #include "vec3.h"
-#include "hitable.h"
 #endif
 #include <curand_kernel.h>
 #include <float.h>
@@ -78,7 +78,7 @@ void check_cuda(cudaError_t result, char const *const func, const char *const fi
 // depth of 50, so we adapt this a few chapters early on the GPU.
 __device__ vec3 color(const ray &r, hitable **world, curandState *local_rand_state) {
     ray cur_ray = r;
-#ifdef USE_REDUCED_PRECISION
+#ifdef REDUCED_PRECISION
     vec3 cur_attenuation = vec3(__float2half(1.0f), __float2half(1.0f), __float2half(1.0f));
 #else
     vec3 cur_attenuation = vec3(1.0, 1.0, 1.0);
@@ -86,7 +86,7 @@ __device__ vec3 color(const ray &r, hitable **world, curandState *local_rand_sta
     // TODO 10 seams to be a sweet spot
     for (int i = 0; i < BOUNCES; i++) {
         hit_record rec;
-#ifdef USE_REDUCED_PRECISION
+#ifdef REDUCED_PRECISION
         if ((*world)->hit(cur_ray, __float2half(0.005f), __float2half(60000.0f), rec)) {
 #else
         if ((*world)->hit(cur_ray, 0.001f, FLT_MAX, rec)) {
@@ -95,9 +95,13 @@ __device__ vec3 color(const ray &r, hitable **world, curandState *local_rand_sta
             vec3 attenuation;
             if (rec.mat_ptr->scatter(cur_ray, rec, attenuation, scattered, local_rand_state)) {
                 cur_attenuation *= attenuation;
+#ifdef SMART_BOUNCES
+                if (cur_attenuation.squared_length() < 0.0003)
+                    return vec3(0.0, 0.0, 0.0);
+#endif
                 cur_ray = scattered;
             } else {
-#ifdef USE_REDUCED_PRECISION
+#ifdef REDUCED_PRECISION
                 return vec3(__float2half(0.0f), __float2half(0.0f), __float2half(0.0f));
 #else
                 return vec3(0.0, 0.0, 0.0);
@@ -105,7 +109,7 @@ __device__ vec3 color(const ray &r, hitable **world, curandState *local_rand_sta
             }
         } else {
             vec3 unit_direction = unit_vector(cur_ray.direction());
-#ifdef USE_REDUCED_PRECISION
+#ifdef REDUCED_PRECISION
             half t = __float2half(0.5f) * (unit_direction.y() + __float2half(1.0f));
             vec3 c = (__float2half(1.0f) - t) * vec3(__float2half(1.0f), __float2half(1.0f), __float2half(1.0f)) + t * vec3(__float2half(0.5f), __float2half(0.7f), __float2half(1.0f));
 #else
@@ -115,7 +119,7 @@ __device__ vec3 color(const ray &r, hitable **world, curandState *local_rand_sta
             return cur_attenuation * c;
         }
     }
-#ifdef USE_REDUCED_PRECISION
+#ifdef REDUCED_PRECISION
     return vec3(__float2half(0.0f), __float2half(0.0f), __float2half(0.0f)); // exceeded recursion
 #else
     return vec3(0.0, 0.0, 0.0); // exceeded recursion
@@ -163,13 +167,13 @@ __global__ void render(vec3 *frame_buffer, int max_x, int max_y, int num_steps, 
         return;
     int pixel_index = j * max_x + i;
     curandState local_rand_state = rand_state[pixel_index];
-#ifdef USE_REDUCED_PRECISION
+#ifdef REDUCED_PRECISION
     vec3 col(__float2half(0.0f), __float2half(0.0f), __float2half(0.0f));
 #else
     vec3 col(0, 0, 0);
 #endif
     for (int s = 0; s < num_steps; s++) {
-#ifdef USE_REDUCED_PRECISION
+#ifdef REDUCED_PRECISION
         half u = __float2half(float(i + curand_uniform(&local_rand_state)) / float(max_x));
         half v = __float2half(float(j + curand_uniform(&local_rand_state)) / float(max_y));
 #else
@@ -180,7 +184,7 @@ __global__ void render(vec3 *frame_buffer, int max_x, int max_y, int num_steps, 
         col += color(r, world, &local_rand_state);
     }
     rand_state[pixel_index] = local_rand_state;
-#ifdef USE_REDUCED_PRECISION
+#ifdef REDUCED_PRECISION
     col /= __float2half(float(num_steps));
     col[0] = hsqrt(col[0]);
     col[1] = hsqrt(col[1]);
@@ -205,7 +209,7 @@ __global__ void render(vec3 *frame_buffer, int max_x, int max_y, int num_steps, 
     curandState local_rand_state = rand_state[random_index];
 
     __shared__ vec3 col_per_ray[THREADS_Y][THREADS_X][RAYS_PER_PIXEL];
-#ifdef USE_REDUCED_PRECISION
+#ifdef REDUCED_PRECISION
     half u = __float2half(float(i + curand_uniform(&local_rand_state)) / float(max_x));
     half v = __float2half(float(j + curand_uniform(&local_rand_state)) / float(max_y));
 #else
@@ -219,7 +223,7 @@ __global__ void render(vec3 *frame_buffer, int max_x, int max_y, int num_steps, 
     if (k != 0)
         return;
     __syncthreads();
-#ifdef USE_REDUCED_PRECISION
+#ifdef REDUCED_PRECISION
     vec3 col(__float2half(0.0f), __float2half(0.0f), __float2half(0.0f));
 #else
     vec3 col(0, 0, 0);
@@ -227,7 +231,7 @@ __global__ void render(vec3 *frame_buffer, int max_x, int max_y, int num_steps, 
     for (int s = 0; s < num_steps; s++) {
         col += col_per_ray[threadIdx.y][threadIdx.x][s];
     }
-#ifdef USE_REDUCED_PRECISION
+#ifdef REDUCED_PRECISION
     col /= __float2half(float(num_steps));
     col[0] = hsqrt(col[0]);
     col[1] = hsqrt(col[1]);
@@ -242,7 +246,7 @@ __global__ void render(vec3 *frame_buffer, int max_x, int max_y, int num_steps, 
 }
 #endif
 
-#ifdef USE_OPTIMIZED_RENDER
+#ifdef OPTIMIZED_RENDER
 __global__ void render_optimized(vec3 *frame_buffer, int max_x, int max_y, int num_steps, camera **cam, hitable **world, curandState *rand_state) {
     int i = threadIdx.x + blockIdx.x * blockDim.x;
     int j = threadIdx.y + blockIdx.y * blockDim.y;
@@ -250,7 +254,7 @@ __global__ void render_optimized(vec3 *frame_buffer, int max_x, int max_y, int n
         return;
     int pixel_index = j * max_x + i;
     curandState local_rand_state = rand_state[pixel_index];
-#ifdef USE_REDUCED_PRECISION
+#ifdef REDUCED_PRECISION
     half u = __float2half(float(i + curand_uniform(&local_rand_state)) / float(max_x));
     half v = __float2half(float(j + curand_uniform(&local_rand_state)) / float(max_y));
 #else
@@ -271,7 +275,7 @@ __global__ void render_optimized(vec3 *frame_buffer, int max_x, int max_y, int n
 __global__ void create_world(hitable **d_list, hitable **d_world, camera **d_camera, int nx, int ny, curandState *rand_state) {
     if (threadIdx.x == 0 && blockIdx.x == 0) {
         curandState local_rand_state = *rand_state;
-#ifdef USE_REDUCED_PRECISION
+#ifdef REDUCED_PRECISION
         d_list[0] = new sphere(vec3(__float2half(0.0f), __float2half(-1000.0f), __float2half(-1.0f)), __float2half(1000.0f),
                                new lambertian(vec3(__float2half(0.5f), __float2half(0.5f), __float2half(0.5f))));
 #else
@@ -281,7 +285,7 @@ __global__ void create_world(hitable **d_list, hitable **d_world, camera **d_cam
         int i = 1;
         for (int a = -11; a < 11; a++) {
             for (int b = -11; b < 11; b++) {
-#ifdef USE_REDUCED_PRECISION
+#ifdef REDUCED_PRECISION
                 half choose_mat = __float2half(RND);
                 vec3 center(__float2half(a + RND), __float2half(0.2f), __float2half(b + RND));
                 if (choose_mat < __float2half(0.8f)) {
@@ -308,7 +312,7 @@ __global__ void create_world(hitable **d_list, hitable **d_world, camera **d_cam
 #endif
             }
         }
-#ifdef USE_REDUCED_PRECISION
+#ifdef REDUCED_PRECISION
         d_list[i++] = new sphere(vec3(__float2half(0.0f), __float2half(1.0f), __float2half(0.0f)), __float2half(1.0f), new dielectric(__float2half(1.5f)));
         d_list[i++] = new sphere(vec3(__float2half(-4.0f), __float2half(1.0f), __float2half(0.0f)), __float2half(1.0f), new lambertian(vec3(__float2half(0.4f), __float2half(0.2f), __float2half(0.1f))));
         d_list[i++] = new sphere(vec3(__float2half(4.0f), __float2half(1.0f), __float2half(0.0f)), __float2half(1.0f), new metal(vec3(__float2half(0.7f), __float2half(0.6f), __float2half(0.5f)), __float2half(0.0f)));
@@ -319,7 +323,7 @@ __global__ void create_world(hitable **d_list, hitable **d_world, camera **d_cam
 #endif
         *rand_state = local_rand_state;
         *d_world = new hitable_list(d_list, 22 * 22 + 1 + 3);
-#ifdef USE_REDUCED_PRECISION
+#ifdef REDUCED_PRECISION
         vec3 lookfrom(__float2half(13.0f), __float2half(2.0f), __float2half(3.0f));
         vec3 lookat(__float2half(0.0f), __float2half(0.0f), __float2half(0.0f));
         half dist_to_focus = __float2half(10.0f);
@@ -458,14 +462,14 @@ int main(int argc, char const *argv[]) {
     checkCudaErrors(cudaDeviceSynchronize());
 
     std::cout << "[4] Rendering the frame" << std::endl;
-#ifdef USE_OPTIMIZED_RENDER
+#ifdef OPTIMIZED_RENDER
     for (int s = 0; s < num_steps; s++) {
         render_optimized<<<blocks, threads>>>(d_frame_buffer, pixels_x, pixels_y, num_steps, d_camera, d_world, d_rand_state);
     }
 #elifdef PARALLEL_RAYS
     render<<<blocks, threads, tx * ty * num_steps * sizeof(vec3)>>>(d_frame_buffer, pixels_x, pixels_y, num_steps, d_camera, d_world, d_rand_state);
 #elifdef BVH
-    render<<<blocks, threads>>>(d_frame_buffer, pixels_x, pixels_y, num_steps, d_camera, (hitable**)d_bvh, d_rand_state);
+    render<<<blocks, threads>>>(d_frame_buffer, pixels_x, pixels_y, num_steps, d_camera, (hitable **)d_bvh, d_rand_state);
 #else
     render<<<blocks, threads>>>(d_frame_buffer, pixels_x, pixels_y, num_steps, d_camera, d_world, d_rand_state);
 #endif
@@ -487,8 +491,8 @@ int main(int argc, char const *argv[]) {
             for (int i = 0; i < pixels_x; i++) {
                 size_t pixel_index = j * pixels_x + i;
                 vec3 col = d_frame_buffer[pixel_index];
-#ifdef USE_OPTIMIZED_RENDER
-#ifdef USE_REDUCED_PRECISION
+#ifdef OPTIMIZED_RENDER
+#ifdef REDUCED_PRECISION
                 col /= __float2half(float(num_steps));
                 col = vec3(hsqrt(col[0]), hsqrt(col[1]), hsqrt(col[2]));
 #else
@@ -496,7 +500,7 @@ int main(int argc, char const *argv[]) {
                 col = vec3(sqrt(col[0]), sqrt(col[1]), sqrt(col[2]));
 #endif
 #endif
-#ifdef USE_REDUCED_PRECISION
+#ifdef REDUCED_PRECISION
                 int ir = int(255.99 * __half2float(col.r()));
                 int ig = int(255.99 * __half2float(col.g()));
                 int ib = int(255.99 * __half2float(col.b()));
