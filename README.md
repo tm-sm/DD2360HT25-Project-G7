@@ -2,7 +2,7 @@
 ## Group Members
 - Corentin JEANNE \<cjeanne@kth.se>
 - Timoteo SMART \<timoteo@ug.kth.se>
-- Midhushaan Ananthakumar \<midana\@kth.se>
+- Midhushaan Ananthakumar \<midana@kth.se>
 
 ## Compiling
 Inside the `src` directory, execute
